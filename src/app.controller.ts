@@ -42,6 +42,70 @@ export class AppController {
     return this.appService.getHello();
   }
 
+  /**
+   * Endpoint para verificar la salud de la aplicación
+   * Útil para Kubernetes liveness/readiness probes
+   */
+  @Get('healthz')
+  getHealth(): any {
+    this.logger.log('Health check solicitado');
+
+    const uptime = Math.floor((Date.now() - this.startTime) / 1000);
+    const memoryUsage = process.memoryUsage();
+
+    return {
+      status: 'up',
+      uptime: `${uptime} segundos`,
+      version: packageInfo.version,
+      memory: {
+        rss: `${Math.round(memoryUsage.rss / 1024 / 1024)} MB`,
+        heapTotal: `${Math.round(memoryUsage.heapTotal / 1024 / 1024)} MB`,
+        heapUsed: `${Math.round(memoryUsage.heapUsed / 1024 / 1024)} MB`,
+      },
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  /**
+   * Endpoint para obtener un estado detallado del sistema
+   * Proporciona información extendida sobre la aplicación y su entorno
+   */
+  @Get('status/details')
+  getStatusWithDetails(): any {
+    this.logger.log('Status detallado solicitado');
+
+    const uptime = Math.floor((Date.now() - this.startTime) / 1000);
+    const memoryUsage = process.memoryUsage();
+    const environment = this.configService.get<string>(
+      'NODE_ENV',
+      'development',
+    );
+
+    return {
+      status: 'up',
+      uptime: `${uptime} segundos`,
+      version: packageInfo.version,
+      environment,
+      system: {
+        platform: process.platform,
+        nodeVersion: process.version,
+        memory: {
+          rss: `${Math.round(memoryUsage.rss / 1024 / 1024)} MB`,
+          heapTotal: `${Math.round(memoryUsage.heapTotal / 1024 / 1024)} MB`,
+          heapUsed: `${Math.round(memoryUsage.heapUsed / 1024 / 1024)} MB`,
+        },
+      },
+      dependencies: {
+        nestjs: packageInfo.dependencies['@nestjs/core'],
+        axios: packageInfo.dependencies.axios,
+      },
+      externalServices: {
+        configured: !!this.externalServiceUrl,
+      },
+      timestamp: new Date().toISOString(),
+    };
+  }
+
   @Get('test-error/nestjs')
   testNestError(): string {
     throw new BadRequestException('Bad request error from NestJS');
@@ -129,29 +193,5 @@ export class AppController {
         timestamp: new Date().toISOString(),
       };
     }
-  }
-
-  /**
-   * Endpoint para verificar la salud de la aplicación
-   * Útil para Kubernetes liveness/readiness probes
-   */
-  @Get('healthz')
-  getHealth(): any {
-    this.logger.log('Health check solicitado');
-
-    const uptime = Math.floor((Date.now() - this.startTime) / 1000);
-    const memoryUsage = process.memoryUsage();
-
-    return {
-      status: 'up',
-      uptime: `${uptime} segundos`,
-      version: packageInfo.version,
-      memory: {
-        rss: `${Math.round(memoryUsage.rss / 1024 / 1024)} MB`,
-        heapTotal: `${Math.round(memoryUsage.heapTotal / 1024 / 1024)} MB`,
-        heapUsed: `${Math.round(memoryUsage.heapUsed / 1024 / 1024)} MB`,
-      },
-      timestamp: new Date().toISOString(),
-    };
   }
 }

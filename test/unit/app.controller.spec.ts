@@ -274,4 +274,95 @@ describe('AppController', () => {
       expect(() => new Date(healthData.timestamp)).not.toThrow();
     });
   });
+
+  // Test suite para status with details
+  describe('getStatusWithDetails', () => {
+    let originalNodeEnv;
+
+    beforeAll(() => {
+      originalNodeEnv = process.env.NODE_ENV;
+      process.env.NODE_ENV = 'test';
+    });
+
+    afterAll(() => {
+      process.env.NODE_ENV = originalNodeEnv;
+    });
+
+    beforeEach(async () => {
+      const mockConfigService = {
+        get: jest.fn().mockImplementation((key, defaultValue) => {
+          if (key === 'EXTERNAL_SERVICE_URL') {
+            return 'http://test-api.example.com';
+          }
+          if (key === 'NODE_ENV') {
+            return 'test';
+          }
+          return defaultValue;
+        }),
+      };
+
+      const app: TestingModule = await Test.createTestingModule({
+        controllers: [AppController],
+        providers: [
+          { provide: AppService, useValue: mockAppService },
+          { provide: ConfigService, useValue: mockConfigService },
+        ],
+      }).compile();
+
+      appController = app.get<AppController>(AppController);
+      jest.clearAllMocks();
+    });
+
+    it('should return detailed status information', () => {
+      const result = appController.getStatusWithDetails();
+
+      // Verificar estructura y tipos de datos
+      expect(result).toHaveProperty('status', 'up');
+      expect(result).toHaveProperty('uptime');
+      expect(result).toHaveProperty('version');
+      expect(result).toHaveProperty('environment', 'test');
+      expect(result).toHaveProperty('system');
+      expect(result.system).toHaveProperty('platform');
+      expect(result.system).toHaveProperty('nodeVersion');
+      expect(result.system).toHaveProperty('memory');
+      expect(result.system.memory).toHaveProperty('rss');
+      expect(result.system.memory).toHaveProperty('heapTotal');
+      expect(result.system.memory).toHaveProperty('heapUsed');
+      expect(result).toHaveProperty('dependencies');
+      expect(result.dependencies).toHaveProperty('nestjs');
+      expect(result.dependencies).toHaveProperty('axios');
+      expect(result).toHaveProperty('externalServices');
+      expect(result.externalServices).toHaveProperty('configured', true);
+      expect(result).toHaveProperty('timestamp');
+    });
+
+    it('should show externalServices.configured as false when no external service is configured', async () => {
+      // Reconfiguramos el controlador con un mock que devuelve URL vacía
+      const mockConfigService = {
+        get: jest.fn().mockImplementation((key, defaultValue) => {
+          if (key === 'EXTERNAL_SERVICE_URL') {
+            return ''; // URL vacía
+          }
+          if (key === 'NODE_ENV') {
+            return 'test';
+          }
+          return defaultValue;
+        }),
+      };
+
+      const app: TestingModule = await Test.createTestingModule({
+        controllers: [AppController],
+        providers: [
+          { provide: AppService, useValue: mockAppService },
+          { provide: ConfigService, useValue: mockConfigService },
+        ],
+      }).compile();
+
+      const controller = app.get<AppController>(AppController);
+
+      const result = controller.getStatusWithDetails();
+
+      expect(result.externalServices.configured).toBe(false);
+    });
+  });
 });
