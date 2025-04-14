@@ -2,6 +2,13 @@
 
 Todos los cambios notables de este proyecto serán documentados en este archivo.
 
+# 1.0.0 (2025-04-14)
+
+
+### Features
+
+* Add detailed status endpoint with tests ([3b1640f](https://github.com/yasazo/flow-test/commit/3b1640f6e7e98317083a3b4bc04dc219fe31254c))
+
 # [1.3.0](https://github.com/yasazo/flow-template/compare/v1.2.1...v1.3.0) (2025-04-14)
 
 
