@@ -1,0 +1,96 @@
+name: Validación Continua
+
+on:
+  push:
+    branches:
+      - '**'
+      - '!main'
+      - '!develop'
+    paths-ignore:
+      - 'README.md'
+      - 'docs/**'
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Obtener código
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Ejecutar lint
+        run: npm run lint
+
+      - name: Ejecutar tests con cobertura
+        run: npm run test:cov
+
+      - name: Construir aplicación
+        run: npm run build
+        
+  # Validación específica para hotfixes con controles adicionales
+  hotfix-validation:
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/heads/hotfix/')
+    steps:
+      - name: Obtener código
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verificar origen de hotfix
+        id: verify-hotfix
+        run: |
+          # Obtener último tag de producción
+          LATEST_TAG=$(git describe --tags --abbrev=0 --match "v*" 2>/dev/null || echo "")
+          
+          if [ -z "$LATEST_TAG" ]; then
+            echo "No se encontraron tags de versión. No se puede verificar el origen del hotfix."
+            exit 0
+          fi
+          
+          # Verificar si la rama se creó desde el tag correcto
+          BRANCH_POINT=$(git merge-base HEAD $LATEST_TAG)
+          TAG_COMMIT=$(git rev-parse $LATEST_TAG)
+          
+          if [ "$BRANCH_POINT" = "$TAG_COMMIT" ]; then
+            echo "✅ Hotfix correctamente creado desde el último tag de producción: $LATEST_TAG"
+          else
+            echo "⚠️ Advertencia: Este hotfix no parece estar basado en el último tag de producción: $LATEST_TAG"
+            echo "Se recomienda usar 'npm run create-hotfix' para crear hotfixes correctamente."
+          fi
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Verificar cambios mínimos
+        run: |
+          # Verificar que solo se modifican archivos relacionados con la corrección
+          git diff --name-only origin/main > changed_files.txt
+          NUM_CHANGED=$(cat changed_files.txt | wc -l)
+          
+          echo "Archivos modificados: $NUM_CHANGED"
+          cat changed_files.txt
+          
+          if [ $NUM_CHANGED -gt 10 ]; then
+            echo "⚠️ Advertencia: Este hotfix modifica muchos archivos ($NUM_CHANGED). Los hotfixes deberían ser lo más concisos posible."
+          fi
+      
+      - name: Ejecutar validaciones críticas
+        run: |
+          npm run lint
+          npm run test:cov
+          npm run build

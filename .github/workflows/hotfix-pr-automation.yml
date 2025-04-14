@@ -1,0 +1,100 @@
+name: Automatización de PRs de Hotfix
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+    branches:
+      - main
+
+jobs:
+  hotfix-automation:
+    runs-on: ubuntu-latest
+    if: startsWith(github.head_ref, 'hotfix/')
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Aplicar etiqueta de hotfix
+        run: |
+          # Verificar si la etiqueta hotfix existe, si no, crearla
+          gh label list | grep -q "hotfix" || gh label create "hotfix" --color "d73a4a" --description "Corrección urgente para producción"
+          
+          # Verificar si la etiqueta high-priority existe, si no, crearla
+          gh label list | grep -q "high-priority" || gh label create "high-priority" --color "b60205" --description "Necesita atención inmediata"
+          
+          # Aplicar etiquetas al PR
+          gh pr edit "$PR_URL" --add-label "hotfix,high-priority"
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verificar plantilla de hotfix
+        id: check-template
+        run: |
+          PR_BODY="${{ github.event.pull_request.body }}"
+          
+          if [[ "$PR_BODY" != *"## 🚨 Descripción del Problema"* ]]; then
+            echo "warning=Se recomienda usar la plantilla de hotfix para este PR" >> $GITHUB_OUTPUT
+            echo "template_used=false" >> $GITHUB_OUTPUT
+          else
+            echo "template_used=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Notificar sobre plantilla
+        if: steps.check_template.outputs.template_used == 'false'
+        run: |
+          COMMENT="⚠️ **Recomendación**: Este PR parece ser un hotfix pero no está usando la plantilla de hotfix.
+          
+          Para una mejor revisión y trazabilidad, por favor considera usar la plantilla de hotfix que contiene campos importantes como:
+          - Descripción del problema
+          - Impacto en producción
+          - Verificación de la solución
+          - Consideraciones para despliegue
+          
+          Puedes editar este PR para incluir esta información."
+          
+          gh pr comment "$PR_URL" --body "$COMMENT"
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Asignar revisores
+        run: |
+          # Usar los revisores configurados en las variables del workflow o repositorio
+          # Si no están definidos, usar valores por defecto
+          
+          # Opción 1: Usar variable de workflow
+          if [ -n "$HOTFIX_REVIEWERS" ]; then
+            REVIEWERS="$HOTFIX_REVIEWERS"
+          # Opción 2: Usar el propietario del repositorio como respaldo
+          else
+            REVIEWERS="${GITHUB_REPOSITORY_OWNER}"
+          fi
+          
+          echo "Asignando revisores: $REVIEWERS"
+          gh pr edit "$PR_URL" --add-reviewer "$REVIEWERS"
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Definir los revisores aquí - se puede sobreescribir a nivel de repositorio
+          HOTFIX_REVIEWERS: ${{ vars.HOTFIX_REVIEWERS || github.repository_owner }}
+
+      - name: Verificar tamaño de cambios
+        run: |
+          NUM_FILES_CHANGED=$(gh pr view "$PR_URL" --json files --jq '.files | length')
+          
+          if [ $NUM_FILES_CHANGED -gt 10 ]; then
+            COMMENT="⚠️ **Advertencia**: Este hotfix modifica $NUM_FILES_CHANGED archivos.
+            
+            Los hotfixes deberían ser lo más concisos posible para minimizar el riesgo.
+            Por favor, verifica que todos los cambios son realmente necesarios para corregir el problema."
+            
+            gh pr comment "$PR_URL" --body "$COMMENT"
+          else
+            echo "✅ Tamaño de hotfix razonable: $NUM_FILES_CHANGED archivos"
+          fi
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} 

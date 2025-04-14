@@ -1,0 +1,93 @@
+name: Promoción a Producción
+
+on:
+  workflow_dispatch:
+    inputs:
+      rc_tag:
+        description: 'Tag de Release Candidate a promocionar (ej: rc-2023.08.15.1430)'
+        required: true
+
+jobs:
+  promote-to-production:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Obtener repositorio
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.inputs.rc_tag }}
+
+      - name: Preparar flujo
+        id: prepare
+        run: |
+          echo "REPOSITORY_NAME=$(echo "$GITHUB_REPOSITORY" | awk -F / '{print $2}')" >> $GITHUB_OUTPUT
+
+      - name: Obtener referencia de imagen Docker
+        id: image_ref
+        run: |
+          IMAGE_ID=$(cat .docker-image-ref)
+          echo "Usando imagen Docker: $IMAGE_ID"
+          echo "image_id=$IMAGE_ID" >> $GITHUB_OUTPUT
+
+      - name: Calcular versión con Semantic Release
+        id: semantic
+        uses: cycjimmy/semantic-release-action@v4
+        with:
+          semantic_version: 19
+          branches: |
+            [
+              'main'
+            ]
+          dry_run: true
+          extra_plugins: |
+            @semantic-release/changelog
+            @semantic-release/git
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Determinar versión final
+        id: version
+        run: |
+          if [ -n "${{ steps.semantic.outputs.new_release_version }}" ]; then
+            echo "version=v${{ steps.semantic.outputs.new_release_version }}" >> $GITHUB_OUTPUT
+            echo "Versión calculada: v${{ steps.semantic.outputs.new_release_version }}"
+          else
+            echo "version=v1.0.0" >> $GITHUB_OUTPUT
+            echo "Primera versión: v1.0.0"
+          fi
+
+      - name: Login a GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Etiquetar imagen para Producción
+        run: |
+          SOURCE_IMAGE=ghcr.io/${{ github.repository_owner }}/${{ steps.prepare.outputs.REPOSITORY_NAME }}:${{ steps.image_ref.outputs.image_id }}
+          LATEST_IMAGE=ghcr.io/${{ github.repository_owner }}/${{ steps.prepare.outputs.REPOSITORY_NAME }}:latest
+          VERSION_IMAGE=ghcr.io/${{ github.repository_owner }}/${{ steps.prepare.outputs.REPOSITORY_NAME }}:${{ steps.version.outputs.version }}
+
+          docker pull $SOURCE_IMAGE
+          docker tag $SOURCE_IMAGE $LATEST_IMAGE
+          docker tag $SOURCE_IMAGE $VERSION_IMAGE
+          docker push $LATEST_IMAGE
+          docker push $VERSION_IMAGE
+
+          echo "Imagen etiquetada exitosamente como latest y ${{ steps.version.outputs.version }}"
+
+      - name: Crear Release con Semantic Release
+        uses: cycjimmy/semantic-release-action@v4
+        with:
+          semantic_version: 19
+          branches: |
+            [
+              'main'
+            ]
+          extra_plugins: |
+            @semantic-release/changelog
+            @semantic-release/git
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

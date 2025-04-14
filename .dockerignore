@@ -1,0 +1,15 @@
+# Ignora archivos innecesarios para reducir el contexto de construcción
+node_modules
+npm-debug.log
+yarn-error.log
+.git
+.github
+.vscode
+.idea
+*.md
+.env*
+dist
+coverage
+test
+logs
+*.log

@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "commit_message_template": {
+    "instructions": "Genera un mensaje de commit siguiendo estrictamente las convenciones descritas en .commit-template.md. Asegúrate de usar el tipo de commit adecuado según los cambios que se están realizando. Para cambios importantes que rompen la compatibilidad, usa uno de los tres métodos para indicar BREAKING CHANGE.",
+    "format": "<tipo>([ámbito]): <descripción>",
+    "conventional_commits": true
+  },
+  "ai": {
+    "context_files": [
+      ".cursor/.commit-template.md",
+      ".releaserc.json",
+      "README.md"
+    ]
+  }
+}

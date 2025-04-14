@@ -1,0 +1,175 @@
+name: Sync Hotfix to Develop
+
+on:
+  workflow_run:
+    workflows: ["Pipeline Principal"]
+    types:
+      - completed
+
+jobs:
+  create-sync-pr:
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: main
+
+      - name: Detectar hotfix
+        id: detect_hotfix
+        run: |
+          # Obtener nombre de la rama que activó el workflow
+          BRANCH_NAME="${{ github.event.workflow_run.head_branch }}"
+          echo "Rama que activó el workflow: $BRANCH_NAME"
+          
+          # Verificar si la rama es un hotfix por su prefijo (única forma válida)
+          if [[ "$BRANCH_NAME" == hotfix/* ]]; then
+            echo "✅ Hotfix detectado: $BRANCH_NAME"
+            echo "is_hotfix=true" >> $GITHUB_OUTPUT
+            echo "hotfix_branch=$BRANCH_NAME" >> $GITHUB_OUTPUT
+          else
+            echo "❌ No es un hotfix (no tiene prefijo hotfix/), no se requiere sincronización"
+            echo "is_hotfix=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Preparar para sincronización
+        if: steps.detect_hotfix.outputs.is_hotfix == 'true'
+        id: prepare
+        run: |
+          # Verificar si develop existe
+          git fetch --all --prune
+          
+          if git show-ref --verify --quiet refs/remotes/origin/develop; then
+            echo "✅ Rama develop encontrada"
+            echo "develop_exists=true" >> $GITHUB_OUTPUT
+            
+            # Verificar si hay diferencias
+            MAIN_HASH=$(git rev-parse origin/main)
+            DEVELOP_HASH=$(git rev-parse origin/develop)
+            
+            if [ "$MAIN_HASH" = "$DEVELOP_HASH" ]; then
+              echo "✅ Las ramas ya están sincronizadas (mismo commit)"
+              echo "need_sync=false" >> $GITHUB_OUTPUT
+            else
+              echo "⚠️ Las ramas necesitan sincronización"
+              echo "need_sync=true" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "❌ La rama develop no existe"
+            echo "develop_exists=false" >> $GITHUB_OUTPUT
+            echo "need_sync=false" >> $GITHUB_OUTPUT
+          fi
+          
+          # Preparar etiquetas de GitHub
+          gh label list | grep -q "hotfix" || gh label create "hotfix" --color "d73a4a" --description "Corrección urgente para producción"
+          gh label list | grep -q "sync" || gh label create "sync" --color "0e8a16" --description "Sincronización entre ramas"
+          gh label list | grep -q "automated" || gh label create "automated" --color "006b75" --description "PR generado automáticamente"
+          gh label list | grep -q "high-priority" || gh label create "high-priority" --color "b60205" --description "Necesita atención inmediata"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Sincronizar mediante PR
+        id: create_pr
+        if: steps.detect_hotfix.outputs.is_hotfix == 'true' && steps.prepare.outputs.develop_exists == 'true' && steps.prepare.outputs.need_sync == 'true'
+        uses: peter-evans/create-pull-request@v5
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          branch: sync/hotfix-to-develop
+          base: develop
+          title: "🔄 Sync: Hotfix from main to develop"
+          body: |
+            # ⚠️ Sincronización de hotfix (ALTA PRIORIDAD)
+            
+            Este PR fue creado automáticamente para sincronizar el hotfix aplicado en `main` a la rama `develop`.
+            
+            ## 📋 Detalles
+            - **Rama hotfix**: `${{ steps.detect_hotfix.outputs.hotfix_branch }}`
+            - **Commit ID**: `${{ github.event.workflow_run.head_sha }}`
+            - **Workflow run**: [Ver ejecución](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.event.workflow_run.id }})
+            
+            ## 🔍 Revisión requerida
+            Este PR **requiere revisión manual** para:
+            1. Verificar si existen conflictos con los cambios en `develop`
+            2. Asegurar que la integración no rompe otras características en desarrollo
+            3. Mantener la consistencia entre las ramas `main` y `develop`
+            
+            ## ⚡ Impacto
+            Hasta que no se fusione este PR, la rama `develop` estará desactualizada y no incluirá las correcciones críticas ya aplicadas a producción.
+            
+            ## 📌 Notas
+            - Este PR contiene únicamente los cambios del hotfix aplicado a `main`
+            - El hotfix ya ha sido validado en producción
+            - Si hay conflictos, deben resolverse manualmente
+          labels: |
+            hotfix
+            sync
+            automated
+            high-priority
+          assignees: ${{ github.repository_owner }}
+          reviewers: ${{ vars.HOTFIX_REVIEWERS || github.repository_owner }}
+          draft: false
+
+      # En caso de fallo al crear el PR automático, crear un issue para manual tracking
+      - name: Crear issue si falló el PR
+        id: create_issue
+        if: steps.detect_hotfix.outputs.is_hotfix == 'true' && steps.prepare.outputs.develop_exists == 'true' && steps.prepare.outputs.need_sync == 'true' && steps.create_pr.outputs.pull-request-number == ''
+        run: |
+          echo "⚠️ No se pudo crear el PR automáticamente, creando issue para seguimiento manual..."
+          
+          ISSUE_URL=$(gh issue create \
+            --title "🔥 [URGENTE] Sincronizar hotfix ${{ steps.detect_hotfix.outputs.hotfix_branch }} a develop" \
+            --body "
+            # Sincronización manual requerida
+            
+            El workflow automático no pudo crear un PR para sincronizar el hotfix reciente a develop.
+            
+            ## Detalles
+            - Rama hotfix: \`${{ steps.detect_hotfix.outputs.hotfix_branch }}\`
+            - Commit en main: \`${{ github.event.workflow_run.head_sha }}\`
+            
+            ## Acción requerida
+            Por favor, crea manualmente un PR desde \`main\` a \`develop\` para sincronizar los cambios del hotfix. Pueden existir conflictos que requieran resolución manual.
+            
+            ## Impacto
+            Hasta que no se sincronice este hotfix, la rama develop estará desactualizada y no incluirá las correcciones críticas aplicadas a producción.
+            " \
+            --label "hotfix,high-priority,urgent")
+          
+          if [ -n "$ISSUE_URL" ]; then
+            echo "✅ Issue creado: $ISSUE_URL"
+            echo "issue_url=$ISSUE_URL" >> $GITHUB_OUTPUT
+          else
+            echo "❌ Falló la creación del issue"
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verificar resultado
+        if: steps.detect_hotfix.outputs.is_hotfix == 'true'
+        run: |
+          if [ "${{ steps.prepare.outputs.need_sync }}" != "true" ]; then
+            echo "✅ No se requiere sincronización (ramas ya sincronizadas)"
+            exit 0
+          fi
+          
+          if [ -n "${{ steps.create_pr.outputs.pull-request-number }}" ]; then
+            echo "✅ PR de sincronización creado exitosamente (#${{ steps.create_pr.outputs.pull-request-number }})"
+            echo "URL: ${{ steps.create_pr.outputs.pull-request-url }}"
+            
+            # Si hay conflictos, el PR estará marcado para revisión manual
+            echo "ℹ️ Por favor revisa el PR para verificar si hay conflictos que requieran resolución manual"
+            exit 0
+          fi
+          
+          if [ -n "${{ steps.create_issue.outputs.issue_url }}" ]; then
+            echo "⚠️ No se pudo crear el PR, pero se ha creado un issue para seguimiento"
+            echo "Issue URL: ${{ steps.create_issue.outputs.issue_url }}"
+            exit 0
+          fi
+          
+          echo "❌ No se pudo sincronizar el hotfix ni crear un issue de seguimiento"
+          exit 1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

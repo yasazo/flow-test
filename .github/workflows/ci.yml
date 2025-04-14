@@ -1,0 +1,159 @@
+name: Pipeline Principal
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  detect-source:
+    runs-on: ubuntu-latest
+    outputs:
+      is_hotfix: ${{ steps.check_source.outputs.is_hotfix }}
+      source_branch: ${{ steps.check_source.outputs.source_branch }}
+    steps:
+      - name: Obtener repositorio
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detectar origen del push
+        id: check_source
+        run: |
+          # Obtener el último commit en main
+          COMMIT_MSG=$(git log -1 --pretty=%B)
+          
+          # Verificar si viene de un hotfix
+          if echo "$COMMIT_MSG" | grep -Eq "Merge pull request.*from [^/]+/hotfix/"; then
+            echo "is_hotfix=true" >> $GITHUB_OUTPUT
+            echo "source_branch=$(echo "$COMMIT_MSG" | grep -oE "from [^/]+/hotfix/[^ ]+" | sed 's/from //')" >> $GITHUB_OUTPUT
+            echo "Detectado merge desde rama hotfix"
+          else
+            echo "is_hotfix=false" >> $GITHUB_OUTPUT
+            echo "Origen: integración regular"
+          fi
+
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    needs: detect-source
+    steps:
+      - name: Obtener repositorio
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Preparar flujo
+        id: prepare
+        run: |
+          echo "REPOSITORY_NAME=$(echo "$GITHUB_REPOSITORY" | awk -F / '{print $2}')" >> $GITHUB_OUTPUT
+          
+          # Determinar estado del flujo
+          if [ "${{ needs.detect-source.outputs.is_hotfix }}" == "true" ]; then
+            echo "Es un hotfix desde: ${{ needs.detect-source.outputs.source_branch }}"
+            echo "CONFIG_MODE=hotfix" >> $GITHUB_OUTPUT
+          else
+            echo "CONFIG_MODE=normal" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Ejecutar lint
+        run: npm run lint
+
+      - name: Ejecutar tests
+        run: npm run test:cov
+
+      - name: Cargar reportes de cobertura
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-coverage-reports
+          path: coverage/
+
+      - name: Construir aplicación
+        run: npm run build
+
+      - name: Configurar Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login a GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/${{ steps.prepare.outputs.REPOSITORY_NAME }}
+          tags: |
+            type=raw,value=build-${{ github.run_number }}
+            type=raw,value=sandbox
+            type=sha,format=short
+            ${{ needs.detect-source.outputs.is_hotfix == 'true' && 'type=raw,value=hotfix' || '' }}
+
+      - name: Construir y publicar imagen Docker
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ github.workflow }}
+          cache-to: type=gha,scope=${{ github.workflow }},mode=max
+
+      - name: Ejecutar escaneo de vulnerabilidades
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'table'
+          exit-code: '1'
+          ignore-unfixed: true
+          severity: 'CRITICAL,HIGH'
+
+      - name: Crear Release Candidate
+        id: create_rc
+        run: |
+          DATE_VERSION=$(date +'%Y.%m.%d')
+          BUILD_NUMBER=$(date +'%H%M')
+          
+          # Si es un hotfix, añadir indicador en el RC
+          if [ "${{ needs.detect-source.outputs.is_hotfix }}" == "true" ]; then
+            RC_TAG="rc-${DATE_VERSION}.${BUILD_NUMBER}-hotfix"
+            RC_SUFFIX="-hotfix"
+          else
+            RC_TAG="rc-${DATE_VERSION}.${BUILD_NUMBER}"
+            RC_SUFFIX=""
+          fi
+          
+          echo "sha-$(echo ${{ github.sha }} | cut -c1-7)" > .docker-image-ref
+          git config --local user.email "actions@github.com"
+          git config --local user.name "GitHub Actions"
+          git add .docker-image-ref
+          git commit -m "Añadir referencia a imagen Docker para RC: $RC_TAG"
+          git tag $RC_TAG
+          git push origin $RC_TAG
+
+          # Establecer outputs
+          echo "rc_tag=$RC_TAG" >> $GITHUB_OUTPUT
+          echo "rc_suffix=$RC_SUFFIX" >> $GITHUB_OUTPUT
+          echo "Creado tag RC: $RC_TAG referenciando imagen Docker ${{ github.sha }}"
+
+      - name: Notificación especial para hotfix
+        if: needs.detect-source.outputs.is_hotfix == 'true'
+        run: |
+          echo "🚨 ATENCIÓN: Se ha integrado un HOTFIX a main"
+          echo "Rama origen: ${{ needs.detect-source.outputs.source_branch }}"
+          echo "Se ha generado un RC especial: ${{ steps.create_rc.outputs.rc_tag }}"
+          echo "Este RC requiere validación prioritaria"
+          
+          # Aquí se podrían añadir notificaciones a Slack, Teams, email, etc.

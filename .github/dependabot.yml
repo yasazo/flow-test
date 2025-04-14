@@ -1,0 +1,102 @@
+version: 2
+updates:
+  # Actualizaciones de seguridad - Solo aplican a main
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "daily"
+      time: "03:00"
+      timezone: "America/Mexico_City"
+    # Configuración para actualizaciones de seguridad
+    open-pull-requests-limit: 15
+    target-branch: "main"
+    labels:
+      - "security"
+      - "dependencies"
+      - "automerge"
+    commit-message:
+      prefix: "fix"
+      include: "scope"
+    # Solo aplicar actualizaciones relacionadas con seguridad
+    security-updates-only: true
+    pull-request-branch-name:
+      separator: "-"
+    # Agrupar actualizaciones de seguridad
+    groups:
+      security-patches:
+        patterns:
+          - "*"
+
+  # Actualizaciones regulares para main (rama de desarrollo)
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "America/Mexico_City"
+    open-pull-requests-limit: 10
+    target-branch: "main"
+    labels:
+      - "dependencies"
+    commit-message:
+      prefix: "chore"
+      include: "scope"
+    pull-request-branch-name:
+      separator: "-"
+    # Agrupar actualizaciones por tipo para reducir ruido
+    groups:
+      patch-dependencies:
+        patterns:
+          - "*"
+        update-types:
+          - "patch"
+      minor-dependencies:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+      major-dependencies:
+        patterns:
+          - "*"
+        update-types:
+          - "major"
+    versioning-strategy: "auto"
+
+  # GitHub Actions (CI/CD)
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "wednesday"
+    target-branch: "main"
+    labels:
+      - "ci"
+      - "dependencies"
+      - "automerge"
+    commit-message:
+      prefix: "ci"
+      include: "scope"
+    groups:
+      actions:
+        patterns:
+          - "*"
+
+  # Docker
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "friday"
+    target-branch: "main"
+    labels:
+      - "docker"
+      - "dependencies"
+      - "infrastructure"
+    commit-message:
+      prefix: "build"
+      include: "scope"
+    groups:
+      docker-updates:
+        patterns:
+          - "*"

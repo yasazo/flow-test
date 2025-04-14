@@ -1,0 +1,144 @@
+name: Dependabot Automation
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+    paths:
+      - '**/package.json'
+      - '**/package-lock.json'
+      - '**/yarn.lock'
+      - '**/pnpm-lock.yaml'
+      - 'Dockerfile'
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  metadata:
+    runs-on: ubuntu-latest
+    if: startsWith(github.head_ref, 'dependabot/') || contains(github.event.pull_request.labels.*.name, 'dependencies')
+    outputs:
+      dependency-names: ${{ steps.dependabot-metadata.outputs.dependency-names }}
+      update-type: ${{ steps.dependabot-metadata.outputs.update-type }}
+      package-ecosystem: ${{ steps.dependabot-metadata.outputs.package-ecosystem }}
+      is-security-update: ${{ steps.security-check.outputs.is-security }}
+      is-major-update: ${{ steps.major-check.outputs.is-major }}
+    steps:
+      - name: Dependabot metadata
+        id: dependabot-metadata
+        uses: dependabot/fetch-metadata@v1
+        with:
+          github-token: "${{ secrets.GITHUB_TOKEN }}"
+
+      - name: Check if security update
+        id: security-check
+        run: |
+          if [[ ${{ contains(github.event.pull_request.labels.*.name, 'security') }} == true ]]; then
+            echo "is-security=true" >> $GITHUB_OUTPUT
+          elif [[ ${{ steps.dependabot-metadata.outputs.dependency-names }} == *"(security)"* ]]; then
+            echo "is-security=true" >> $GITHUB_OUTPUT
+          else
+            echo "is-security=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Check if major update
+        id: major-check
+        run: |
+          if [[ "${{ steps.dependabot-metadata.outputs.update-type }}" == "version-update:semver-major" ]]; then
+            echo "is-major=true" >> $GITHUB_OUTPUT
+          else
+            echo "is-major=false" >> $GITHUB_OUTPUT
+          fi
+
+  triage:
+    needs: metadata
+    runs-on: ubuntu-latest
+    steps:
+      # Aplicar etiquetas basadas en tipo de actualización para trazabilidad
+      - name: Etiquetar según tipo de cambio
+        run: |
+          if [[ "${{ needs.metadata.outputs.update-type }}" == "version-update:semver-patch" ]]; then
+            gh pr edit "$PR_URL" --add-label "patch-update"
+          elif [[ "${{ needs.metadata.outputs.update-type }}" == "version-update:semver-minor" ]]; then
+            gh pr edit "$PR_URL" --add-label "minor-update"
+          elif [[ "${{ needs.metadata.outputs.update-type }}" == "version-update:semver-major" ]]; then
+            gh pr edit "$PR_URL" --add-label "major-update,requires-review"
+          fi
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Priorizar actualizaciones de seguridad
+      - name: Priorizar actualizaciones de seguridad
+        if: needs.metadata.outputs.is-security-update == 'true'
+        run: |
+          gh pr edit "$PR_URL" --add-label "high-priority"
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Verificación de CI - Asegurarse de que todas las pruebas pasen antes de cualquier acción
+  verify:
+    needs: [metadata, triage]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verificar estado de CI
+        id: ci-status
+        uses: lewagon/wait-on-check-action@v1.3.4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          check-name: 'validate'
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          wait-interval: 20
+          allowed-conclusions: success
+
+  # Auto-aprobación y fusión basada en políticas
+  auto-approve-merge:
+    needs: [metadata, verify]
+    runs-on: ubuntu-latest
+    # Solo ejecutar si el PR pasó todas las verificaciones requeridas
+    if: ${{ success() }}
+    steps:
+      # Auto-aprobar solo seguridad y patches (no major)
+      - name: Auto-aprobar PRs seguros
+        if: |
+          needs.metadata.outputs.is-security-update == 'true' ||
+          needs.metadata.outputs.update-type == 'version-update:semver-patch'
+        run: |
+          gh pr review "$PR_URL" --approve -b "✅ Auto-aprobado: Este PR contiene cambios de tipo ${{ needs.metadata.outputs.update-type }} que son considerados seguros."
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Notificar para actualizaciones minor
+      - name: Notificar en PRs minor
+        if: needs.metadata.outputs.update-type == 'version-update:semver-minor'
+        run: |
+          gh pr comment "$PR_URL" --body "ℹ️ Este PR contiene actualizaciones MINOR que añaden funcionalidad nueva pero compatible. Por favor revisa antes de aprobar."
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Notificar para actualizaciones major que requieren revisión obligatoria
+      - name: Notificar en PRs major
+        if: needs.metadata.outputs.update-type == 'version-update:semver-major'
+        run: |
+          gh pr comment "$PR_URL" --body "⚠️ **ATENCIÓN REQUERIDA**: Este PR contiene actualizaciones MAJOR que pueden incluir cambios disruptivos. Revisión manual obligatoria."
+          gh pr edit "$PR_URL" --add-label "requires-review,breaking-change-potential"
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Auto-merge solo para PRs aprobados que NO sean major
+      - name: Auto-merge PRs seguros aprobados
+        if: |
+          needs.metadata.outputs.update-type != 'version-update:semver-major' && 
+          (needs.metadata.outputs.is-security-update == 'true' || 
+           needs.metadata.outputs.update-type == 'version-update:semver-patch')
+        run: |
+          gh pr merge "$PR_URL" --auto --rebase --delete-branch
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

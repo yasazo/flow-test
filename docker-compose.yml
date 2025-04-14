@@ -1,0 +1,37 @@
+version: '3.8'
+
+services:
+  flow-template:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    image: flow-template:latest
+    container_name: flow-template
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      # Aquí puedes añadir otras variables de entorno específicas de tu aplicación
+    networks:
+      - nestjs-network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    # Para desarrollo, puedes descomentar estas líneas para tener hot-reload
+    # volumes:
+    #   - ./src:/home/nestapp/app/src
+    #   - ./dist:/home/nestapp/app/dist
+
+networks:
+  nestjs-network:
+    driver: bridge

@@ -1,0 +1,191 @@
+{
+    "branches": [
+        "main",
+        {
+            "name": "rc-*",
+            "prerelease": true
+        }
+    ],
+    "plugins": [
+        [
+            "@semantic-release/commit-analyzer",
+            {
+                "preset": "angular",
+                "releaseRules": [
+                    {
+                        "type": "feat",
+                        "release": "minor"
+                    },
+                    {
+                        "type": "fix",
+                        "release": "patch"
+                    },
+                    {
+                        "type": "docs",
+                        "release": null
+                    },
+                    {
+                        "type": "style",
+                        "release": null
+                    },
+                    {
+                        "type": "refactor",
+                        "release": null
+                    },
+                    {
+                        "type": "perf",
+                        "release": "patch"
+                    },
+                    {
+                        "type": "test",
+                        "release": null
+                    },
+                    {
+                        "type": "build",
+                        "release": "patch"
+                    },
+                    {
+                        "type": "ci",
+                        "release": null
+                    },
+                    {
+                        "type": "chore",
+                        "release": null
+                    },
+                    {
+                        "breaking": true,
+                        "release": "major"
+                    },
+                    {
+                        "type": "feat",
+                        "scope": "BREAKING",
+                        "release": "major"
+                    },
+                    {
+                        "type": "fix",
+                        "scope": "BREAKING",
+                        "release": "major"
+                    },
+                    {
+                        "type": "refactor",
+                        "scope": "BREAKING",
+                        "release": "major"
+                    },
+                    {
+                        "type": "hotfix",
+                        "release": "patch"
+                    },
+                    {
+                        "type": "fix",
+                        "scope": "hotfix",
+                        "release": "patch"
+                    }
+                ],
+                "parserOpts": {
+                    "noteKeywords": [
+                        "BREAKING CHANGE",
+                        "BREAKING CHANGES",
+                        "BREAKING"
+                    ]
+                }
+            }
+        ],
+        [
+            "@semantic-release/release-notes-generator",
+            {
+                "preset": "angular",
+                "parserOpts": {
+                    "noteKeywords": [
+                        "BREAKING CHANGE",
+                        "BREAKING CHANGES",
+                        "BREAKING"
+                    ]
+                },
+                "writerOpts": {
+                    "commitsSort": [
+                        "subject",
+                        "scope"
+                    ]
+                },
+                "presetConfig": {
+                    "types": [
+                        {
+                            "type": "feat",
+                            "section": "✨ Nuevas Funcionalidades"
+                        },
+                        {
+                            "type": "fix",
+                            "section": "🐛 Correcciones de Errores"
+                        },
+                        {
+                            "type": "perf",
+                            "section": "⚡️ Mejoras de Rendimiento"
+                        },
+                        {
+                            "type": "build",
+                            "section": "🏗️ Construcción y Dependencias"
+                        },
+                        {
+                            "type": "docs",
+                            "section": "📚 Documentación"
+                        },
+                        {
+                            "type": "style",
+                            "section": "💎 Estilos"
+                        },
+                        {
+                            "type": "refactor",
+                            "section": "♻️ Refactorizaciones"
+                        },
+                        {
+                            "type": "test",
+                            "section": "✅ Pruebas"
+                        },
+                        {
+                            "type": "ci",
+                            "section": "🔄 Integración Continua"
+                        },
+                        {
+                            "type": "chore",
+                            "section": "🧹 Tareas Generales"
+                        },
+                        {
+                            "type": "hotfix",
+                            "section": "🚨 Hotfixes"
+                        }
+                    ]
+                }
+            }
+        ],
+        [
+            "@semantic-release/changelog",
+            {
+                "changelogFile": "CHANGELOG.md",
+                "changelogTitle": "# Historial de Cambios\n\nTodos los cambios notables de este proyecto serán documentados en este archivo."
+            }
+        ],
+        [
+            "@semantic-release/git",
+            {
+                "assets": [
+                    "CHANGELOG.md"
+                ],
+                "message": "chore(release): v${nextRelease.version} [skip ci]\n\n${nextRelease.notes}"
+            }
+        ],
+        [
+            "@semantic-release/github",
+            {
+                "successComment": "🚀 Este PR está incluido en la versión v${nextRelease.version}",
+                "failComment": "❌ La release falló. Revisar los logs de CI para más detalles.",
+                "failTitle": "❗ Release fallida",
+                "releasedLabels": [
+                    "🏷️ released"
+                ],
+                "releaseNameTemplate": "Versión v{{version}} 🎉"
+            }
+        ]
+    ],
+    "preset": "angular",
+    "tagFormat": "v${version}"
+}
