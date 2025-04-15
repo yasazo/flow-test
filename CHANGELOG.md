@@ -2,6 +2,13 @@
 
 Todos los cambios notables de este proyecto serán documentados en este archivo.
 
+## [1.1.1](https://github.com/yasazo/flow-test/compare/v1.1.0...v1.1.1) (2025-04-15)
+
+
+### Bug Fixes
+
+* Add critical error logging for better production debugging ([e618706](https://github.com/yasazo/flow-test/commit/e618706ff89d13f0682f199f9ba48abaca8317d9))
+
 # [1.1.0](https://github.com/yasazo/flow-test/compare/v1.0.1...v1.1.0) (2025-04-15)
 
 
