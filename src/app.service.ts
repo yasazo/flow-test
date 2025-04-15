@@ -12,6 +12,9 @@ export class AppService {
 
   methodThatWillFail(): string {
     this.logger.log('This method will throw an error');
+    this.logger.error(
+      'CRITICAL: Esta operación ha fallado y requiere atención inmediata',
+    );
     throw new Error('This is a failure in a service method');
   }
 
