@@ -12,10 +12,20 @@ export class AppService {
 
   methodThatWillFail(): string {
     this.logger.log('This method will throw an error');
-    this.logger.error(
-      'CRITICAL: Esta operación ha fallado y requiere atención inmediata',
-    );
-    throw new Error('This is a failure in a service method');
+    try {
+      // Simulamos una operación que podría fallar
+      const result = this.performComplexOperation();
+      this.logger.log('Operation completed successfully');
+      return result;
+    } catch (error) {
+      this.logger.error(`Error en la operación: ${error.message}`, error.stack);
+      throw new Error(`Operación fallida: ${error.message}`);
+    }
+  }
+
+  private performComplexOperation(): string {
+    // Este método ahora devuelve un resultado exitoso después del hotfix
+    return 'Operación completada con éxito';
   }
 
   getTest(): string {
