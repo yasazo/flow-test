@@ -20,17 +20,63 @@ jobs:
       - name: Detectar hotfix
         id: detect_hotfix
         run: |
-          # Obtener nombre de la rama que activó el workflow
-          BRANCH_NAME="${{ github.event.workflow_run.head_branch }}"
-          echo "Rama que activó el workflow: $BRANCH_NAME"
+          # Obtener el último commit en main
+          git fetch origin main
+          LAST_COMMIT_SHA=$(git rev-parse HEAD)
+          echo "Último commit en main: $LAST_COMMIT_SHA"
           
-          # Verificar si la rama es un hotfix por su prefijo (única forma válida)
-          if [[ "$BRANCH_NAME" == hotfix/* ]]; then
-            echo "✅ Hotfix detectado: $BRANCH_NAME"
-            echo "is_hotfix=true" >> $GITHUB_OUTPUT
-            echo "hotfix_branch=$BRANCH_NAME" >> $GITHUB_OUTPUT
+          # Buscar si el último commit de merge viene de un hotfix
+          LAST_MERGE_MSG=$(git log -1 --merges --pretty=%B)
+          echo "Mensaje del último merge: $LAST_MERGE_MSG"
+          
+          IS_HOTFIX=false
+          HOTFIX_BRANCH=""
+          
+          # Verificar si el mensaje de merge contiene 'hotfix/'
+          if [[ "$LAST_MERGE_MSG" == *"hotfix/"* ]]; then
+            echo "✅ Merge de hotfix detectado en el mensaje"
+            IS_HOTFIX=true
+            # Extraer el nombre de la rama de hotfix del mensaje
+            HOTFIX_BRANCH=$(echo "$LAST_MERGE_MSG" | grep -oE "hotfix/[^ ]+" | head -1)
+            echo "Nombre de rama hotfix extraído: $HOTFIX_BRANCH"
           else
-            echo "❌ No es un hotfix (no tiene prefijo hotfix/), no se requiere sincronización"
+            echo "No se detectó hotfix en el mensaje de merge, verificando ramas..."
+            
+            # Verificar todas las ramas que contienen este commit
+            SOURCE_BRANCHES=$(git branch -r --contains $LAST_COMMIT_SHA | grep -v "origin/main" | grep -v "HEAD")
+            
+            echo "Ramas que contienen el último commit:"
+            echo "$SOURCE_BRANCHES"
+            
+            # Buscar si alguna de estas ramas es un hotfix
+            while IFS= read -r branch; do
+              # Limpiar el nombre de la rama
+              branch=$(echo "$branch" | xargs)
+              
+              if [[ -z "$branch" ]]; then
+                continue
+              fi
+              
+              # Quitar "origin/" del nombre de la rama si existe
+              clean_branch=${branch#origin/}
+              
+              echo "Verificando rama: $clean_branch"
+              
+              # Verificar si es una rama de hotfix por el nombre
+              if [[ "$clean_branch" == hotfix/* ]]; then
+                IS_HOTFIX=true
+                HOTFIX_BRANCH="$clean_branch"
+                echo "✅ Hotfix detectado: $HOTFIX_BRANCH"
+                break
+              fi
+            done <<< "$SOURCE_BRANCHES"
+          fi
+          
+          if [[ "$IS_HOTFIX" == "true" ]]; then
+            echo "is_hotfix=true" >> $GITHUB_OUTPUT
+            echo "hotfix_branch=$HOTFIX_BRANCH" >> $GITHUB_OUTPUT
+          else
+            echo "❌ No se detectó ningún hotfix reciente, no se requiere sincronización"
             echo "is_hotfix=false" >> $GITHUB_OUTPUT
           fi
 
