@@ -364,5 +364,36 @@ describe('AppController', () => {
 
       expect(result.externalServices.configured).toBe(false);
     });
+
+    it('should handle errors gracefully and return minimal status info', () => {
+      // Simular un error en process.memoryUsage()
+      const originalMemoryUsage = process.memoryUsage;
+
+      // Mock con tipado correcto para MemoryUsage
+      const mockMemoryUsage = jest.fn().mockImplementation(() => {
+        throw new Error('Error al obtener información de memoria');
+      }) as jest.Mock & typeof process.memoryUsage;
+
+      process.memoryUsage = mockMemoryUsage;
+
+      try {
+        const result = appController.getStatusWithDetails();
+
+        // Verificar que devuelve un objeto con información mínima
+        expect(result).toHaveProperty('status', 'up');
+        expect(result).toHaveProperty(
+          'error',
+          'Error al obtener detalles del sistema',
+        );
+        expect(result).toHaveProperty(
+          'message',
+          'Error al obtener información de memoria',
+        );
+        expect(result).toHaveProperty('timestamp');
+      } finally {
+        // Restaurar la función original
+        process.memoryUsage = originalMemoryUsage;
+      }
+    });
   });
 });

@@ -74,36 +74,51 @@ export class AppController {
   getStatusWithDetails(): any {
     this.logger.log('Status detallado solicitado');
 
-    const uptime = Math.floor((Date.now() - this.startTime) / 1000);
-    const memoryUsage = process.memoryUsage();
-    const environment = this.configService.get<string>(
-      'NODE_ENV',
-      'development',
-    );
+    try {
+      const uptime = Math.floor((Date.now() - this.startTime) / 1000);
+      const memoryUsage = process.memoryUsage();
+      const environment = this.configService.get<string>(
+        'NODE_ENV',
+        'development',
+      );
 
-    return {
-      status: 'up',
-      uptime: `${uptime} segundos`,
-      version: packageInfo.version,
-      environment,
-      system: {
-        platform: process.platform,
-        nodeVersion: process.version,
-        memory: {
-          rss: `${Math.round(memoryUsage.rss / 1024 / 1024)} MB`,
-          heapTotal: `${Math.round(memoryUsage.heapTotal / 1024 / 1024)} MB`,
-          heapUsed: `${Math.round(memoryUsage.heapUsed / 1024 / 1024)} MB`,
+      return {
+        status: 'up',
+        uptime: `${uptime} segundos`,
+        version: packageInfo.version,
+        environment,
+        system: {
+          platform: process.platform,
+          nodeVersion: process.version,
+          memory: {
+            rss: `${Math.round(memoryUsage.rss / 1024 / 1024)} MB`,
+            heapTotal: `${Math.round(memoryUsage.heapTotal / 1024 / 1024)} MB`,
+            heapUsed: `${Math.round(memoryUsage.heapUsed / 1024 / 1024)} MB`,
+          },
         },
-      },
-      dependencies: {
-        nestjs: packageInfo.dependencies['@nestjs/core'],
-        axios: packageInfo.dependencies.axios,
-      },
-      externalServices: {
-        configured: !!this.externalServiceUrl,
-      },
-      timestamp: new Date().toISOString(),
-    };
+        dependencies: {
+          nestjs: packageInfo.dependencies['@nestjs/core'],
+          axios: packageInfo.dependencies.axios,
+        },
+        externalServices: {
+          configured: !!this.externalServiceUrl,
+        },
+        timestamp: new Date().toISOString(),
+      };
+    } catch (error) {
+      this.logger.error(
+        `Error al obtener el estado detallado: ${error.message}`,
+        error.stack,
+      );
+
+      // Devolver una respuesta mínima pero funcional en caso de error
+      return {
+        status: 'up', // La aplicación sigue funcionando aunque no podamos obtener todos los detalles
+        error: 'Error al obtener detalles del sistema',
+        message: error.message,
+        timestamp: new Date().toISOString(),
+      };
+    }
   }
 
   @Get('test-error/nestjs')
