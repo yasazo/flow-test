@@ -6,6 +6,7 @@ on:
       - '**'
       - '!main'
       - '!develop'
+      - '!hotfix/**'
     paths-ignore:
       - 'README.md'
       - 'docs/**'
