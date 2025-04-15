@@ -43,33 +43,38 @@ jobs:
             echo "No se detectó hotfix en el mensaje de merge, verificando ramas..."
             
             # Verificar todas las ramas que contienen este commit
-            SOURCE_BRANCHES=$(git branch -r --contains $LAST_COMMIT_SHA | grep -v "origin/main" | grep -v "HEAD")
+            # Usamos || true para que el comando no falle si no hay resultados
+            SOURCE_BRANCHES=$(git branch -r --contains $LAST_COMMIT_SHA | grep -v "origin/main" | grep -v "HEAD" || true)
             
             echo "Ramas que contienen el último commit:"
             echo "$SOURCE_BRANCHES"
             
             # Buscar si alguna de estas ramas es un hotfix
-            while IFS= read -r branch; do
-              # Limpiar el nombre de la rama
-              branch=$(echo "$branch" | xargs)
-              
-              if [[ -z "$branch" ]]; then
-                continue
-              fi
-              
-              # Quitar "origin/" del nombre de la rama si existe
-              clean_branch=${branch#origin/}
-              
-              echo "Verificando rama: $clean_branch"
-              
-              # Verificar si es una rama de hotfix por el nombre
-              if [[ "$clean_branch" == hotfix/* ]]; then
-                IS_HOTFIX=true
-                HOTFIX_BRANCH="$clean_branch"
-                echo "✅ Hotfix detectado: $HOTFIX_BRANCH"
-                break
-              fi
-            done <<< "$SOURCE_BRANCHES"
+            if [[ -n "$SOURCE_BRANCHES" ]]; then
+              while IFS= read -r branch; do
+                # Limpiar el nombre de la rama
+                branch=$(echo "$branch" | xargs)
+                
+                if [[ -z "$branch" ]]; then
+                  continue
+                fi
+                
+                # Quitar "origin/" del nombre de la rama si existe
+                clean_branch=${branch#origin/}
+                
+                echo "Verificando rama: $clean_branch"
+                
+                # Verificar si es una rama de hotfix por el nombre
+                if [[ "$clean_branch" == hotfix/* ]]; then
+                  IS_HOTFIX=true
+                  HOTFIX_BRANCH="$clean_branch"
+                  echo "✅ Hotfix detectado: $HOTFIX_BRANCH"
+                  break
+                fi
+              done <<< "$SOURCE_BRANCHES"
+            else
+              echo "No se encontraron ramas remotas que contengan este commit (aparte de main)"
+            fi
           fi
           
           if [[ "$IS_HOTFIX" == "true" ]]; then
