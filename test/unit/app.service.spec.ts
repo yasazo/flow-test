@@ -51,13 +51,31 @@ describe('AppService', () => {
   });
 
   describe('methodThatWillFail', () => {
-    it('should throw an error and log it', () => {
-      expect(() => service.methodThatWillFail()).toThrow(
-        'This is a failure in a service method',
-      );
+    it('should return successful operation result after hotfix', () => {
+      // Después del hotfix, el método ya no debería fallar
+      const result = service.methodThatWillFail();
+
+      expect(result).toBe('Operación completada con éxito');
       expect(service['logger'].log).toHaveBeenCalledWith(
         'This method will throw an error',
       );
+      expect(service['logger'].log).toHaveBeenCalledWith(
+        'Operation completed successfully',
+      );
+    });
+
+    it('should handle errors appropriately when operation fails', () => {
+      // Simular un fallo en performComplexOperation
+      jest
+        .spyOn(service as any, 'performComplexOperation')
+        .mockImplementation(() => {
+          throw new Error('Operación simulada falló');
+        });
+
+      expect(() => service.methodThatWillFail()).toThrow(
+        'Operación fallida: Operación simulada falló',
+      );
+      expect(service['logger'].error).toHaveBeenCalled();
     });
   });
 });
