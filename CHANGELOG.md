@@ -2,6 +2,13 @@
 
 Todos los cambios notables de este proyecto serán documentados en este archivo.
 
+## [1.2.1](https://github.com/yasazo/flow-test/compare/v1.2.0...v1.2.1) (2025-04-17)
+
+
+### Bug Fixes
+
+* añadir endpoint de liveness para Kubernetes ([bd529bb](https://github.com/yasazo/flow-test/commit/bd529bbfef9dac0a45bec33bfc85d464b1614609))
+
 # [1.2.0](https://github.com/yasazo/flow-test/compare/v1.1.1...v1.2.0) (2025-04-17)
 
 
