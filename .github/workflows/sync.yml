@@ -138,6 +138,34 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      # Verificar si hay potenciales conflictos
+      - name: Verificar potenciales conflictos
+        id: check_conflicts
+        if: steps.detect_hotfix.outputs.is_hotfix == 'true' && steps.detect_hotfix.outputs.is_develop_merge != 'true' && steps.prepare.outputs.develop_exists == 'true' && steps.prepare.outputs.need_sync == 'true'
+        run: |
+          # Crear una rama temporal para probar el merge
+          git checkout develop
+          git pull origin develop
+          git checkout -b temp-check-conflicts
+          
+          # Intentar hacer merge de main a la rama temporal
+          if git merge main --no-commit --no-ff >/dev/null 2>&1; then
+            echo "✅ No se detectaron conflictos potenciales entre main y develop"
+            echo "has_conflicts=false" >> $GITHUB_OUTPUT
+            # Abortar el merge de prueba
+            git merge --abort
+          else
+            echo "⚠️ Se detectaron potenciales conflictos de merge entre main y develop"
+            echo "has_conflicts=true" >> $GITHUB_OUTPUT
+            # Abortar el merge de prueba
+            git merge --abort
+          fi
+          
+          # Volver a main
+          git checkout main
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       # Creamos manualmente la rama para la PR en lugar de depender de la acción
       - name: Crear rama para PR manualmente
         id: create_branch
@@ -174,8 +202,8 @@ jobs:
           set -euo pipefail
           SYNC_BRANCH="${{ steps.create_branch.outputs.branch_name }}"
           
-          # Crear el PR directamente con gh cli usando JSON para salida estructurada
-          gh pr create \
+          # Crear el PR directamente con gh cli (sin la opción --json)
+          PR_URL=$(gh pr create \
             --title "🔄 Sync: Hotfix from main to develop" \
             --body "# ⚠️ Sincronización de hotfix (ALTA PRIORIDAD)
             
@@ -201,16 +229,14 @@ jobs:
             - Si hay conflictos, deben resolverse manualmente" \
             --base develop \
             --head $SYNC_BRANCH \
-            --label "hotfix,sync,automated,high-priority,urgent" \
-            --json url,number > pr.json
+            --label "hotfix,sync,automated,high-priority,urgent")
           
-          # Extraer información del PR desde el JSON
-          PR_URL=$(jq -r .url pr.json)
-          PR_NUMBER=$(jq -r .number pr.json)
-          
-          if [ -n "$PR_URL" ] && [ -n "$PR_NUMBER" ]; then
+          if [ -n "$PR_URL" ]; then
             echo "✅ PR creado exitosamente: $PR_URL"
             echo "pull_request_url=$PR_URL" >> $GITHUB_OUTPUT
+            
+            # Extraer el número de PR del URL usando expresiones regulares
+            PR_NUMBER=$(basename "$PR_URL")
             echo "pull_request_number=$PR_NUMBER" >> $GITHUB_OUTPUT
             
             # Asignar revisores
@@ -220,6 +246,47 @@ jobs:
             echo "❌ Falló la creación del PR"
             exit 1
           fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Intentar hacer merge automático si no hay conflictos
+      - name: Auto-merge PR si es posible
+        id: auto_merge
+        if: steps.detect_hotfix.outputs.is_hotfix == 'true' && steps.detect_hotfix.outputs.is_develop_merge != 'true' && steps.prepare.outputs.develop_exists == 'true' && steps.prepare.outputs.need_sync == 'true' && steps.create_pr.outputs.pull_request_number != '' && steps.check_conflicts.outputs.has_conflicts == 'false'
+        run: |
+          PR_NUMBER="${{ steps.create_pr.outputs.pull_request_number }}"
+          
+          echo "🔄 Intentando hacer merge automático del PR #$PR_NUMBER..."
+          
+          # Intentar hacer merge con la CLI de GitHub
+          if gh pr merge $PR_NUMBER --merge --auto; then
+            echo "✅ PR #$PR_NUMBER fusionado automáticamente con éxito"
+            echo "merged=true" >> $GITHUB_OUTPUT
+          else
+            echo "⚠️ No se pudo hacer merge automático del PR #$PR_NUMBER"
+            echo "merged=false" >> $GITHUB_OUTPUT
+            
+            # Añadir un comentario al PR
+            gh pr comment $PR_NUMBER --body "⚠️ **No se pudo realizar el merge automático**. Por favor, revisa este PR manualmente para completar la sincronización."
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Notificar conflictos si existen
+      - name: Notificar conflictos
+        if: steps.detect_hotfix.outputs.is_hotfix == 'true' && steps.detect_hotfix.outputs.is_develop_merge != 'true' && steps.prepare.outputs.develop_exists == 'true' && steps.prepare.outputs.need_sync == 'true' && steps.create_pr.outputs.pull_request_number != '' && steps.check_conflicts.outputs.has_conflicts == 'true'
+        run: |
+          PR_NUMBER="${{ steps.create_pr.outputs.pull_request_number }}"
+          
+          echo "⚠️ Se detectaron conflictos potenciales en el PR #$PR_NUMBER"
+          
+          # Añadir un comentario al PR sobre los conflictos
+          gh pr comment $PR_NUMBER --body "🔴 **Se detectaron conflictos potenciales** entre main y develop. Este PR requiere revisión manual y posiblemente resolución de conflictos para completar la sincronización."
+          
+          # Aquí es donde se añadiría la lógica para notificar a Slack
+          echo "📣 NOTIFICACIÓN: Hotfix requiere sincronización manual debido a conflictos"
+          echo "PR: ${{ steps.create_pr.outputs.pull_request_url }}"
+          echo "Hotfix: ${{ steps.detect_hotfix.outputs.hotfix_branch }}"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -276,8 +343,14 @@ jobs:
             echo "✅ PR de sincronización creado exitosamente (#${{ steps.create_pr.outputs.pull_request_number }})"
             echo "URL: ${{ steps.create_pr.outputs.pull_request_url }}"
             
-            # Si hay conflictos, el PR estará marcado para revisión manual
-            echo "ℹ️ Por favor revisa el PR para verificar si hay conflictos que requieran resolución manual"
+            if [ "${{ steps.check_conflicts.outputs.has_conflicts }}" == "true" ]; then
+              echo "⚠️ Se detectaron conflictos potenciales. El PR requiere revisión manual."
+            elif [ "${{ steps.auto_merge.outputs.merged }}" == "true" ]; then
+              echo "✅ PR fusionado automáticamente con éxito"
+            else
+              echo "ℹ️ Por favor revisa el PR para verificar si hay conflictos que requieran resolución manual"
+            fi
+            
             exit 0
           fi
           
