@@ -157,6 +157,21 @@ describe('AppController', () => {
         );
       });
     });
+
+    // Test para el nuevo endpoint de liveness
+    describe('getLiveness', () => {
+      it('should return a minimal response with status alive', () => {
+        const result = appController.getLiveness();
+
+        expect(result).toHaveProperty('status', 'alive');
+        expect(result).toHaveProperty('timestamp');
+
+        // Verificar que timestamp es una fecha válida
+        const timestamp = new Date(result.timestamp);
+        expect(timestamp instanceof Date).toBe(true);
+        expect(timestamp.toString()).not.toBe('Invalid Date');
+      });
+    });
   });
 
   // Test suite para cuando el servicio externo SÍ está configurado
