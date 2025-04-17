@@ -31,6 +31,14 @@ jobs:
           
           IS_HOTFIX=false
           HOTFIX_BRANCH=""
+          IS_DEVELOP_MERGE=false
+          
+          # Detectar explícitamente si es un merge desde develop
+          if [[ "$LAST_MERGE_MSG" == *"from "* && "$LAST_MERGE_MSG" == *"/develop"* ]]; then
+            echo "⚠️ Detectado merge desde develop a main - no se requiere sincronización"
+            IS_DEVELOP_MERGE=true
+            echo "is_develop_merge=true" >> $GITHUB_OUTPUT
+          fi
           
           # Verificar si el mensaje de merge contiene 'hotfix/'
           if [[ "$LAST_MERGE_MSG" == *"hotfix/"* ]]; then
@@ -86,7 +94,7 @@ jobs:
           fi
 
       - name: Preparar para sincronización
-        if: steps.detect_hotfix.outputs.is_hotfix == 'true'
+        if: steps.detect_hotfix.outputs.is_hotfix == 'true' && steps.detect_hotfix.outputs.is_develop_merge != 'true'
         id: prepare
         run: |
           # Verificar si develop existe
@@ -112,6 +120,7 @@ jobs:
               COMMITS_BEHIND=$(git rev-list --count origin/develop ^origin/main)
               echo "Main está $COMMITS_AHEAD commits adelante y $COMMITS_BEHIND commits detrás de develop"
               echo "commits_ahead=$COMMITS_AHEAD" >> $GITHUB_OUTPUT
+              echo "commits_behind=$COMMITS_BEHIND" >> $GITHUB_OUTPUT
             fi
           else
             echo "❌ La rama develop no existe"
@@ -132,10 +141,12 @@ jobs:
       # Creamos manualmente la rama para la PR en lugar de depender de la acción
       - name: Crear rama para PR manualmente
         id: create_branch
-        if: steps.detect_hotfix.outputs.is_hotfix == 'true' && steps.prepare.outputs.develop_exists == 'true' && steps.prepare.outputs.need_sync == 'true'
+        if: steps.detect_hotfix.outputs.is_hotfix == 'true' && steps.detect_hotfix.outputs.is_develop_merge != 'true' && steps.prepare.outputs.develop_exists == 'true' && steps.prepare.outputs.need_sync == 'true'
         run: |
           echo "Creando rama para el PR manualmente..."
-          SYNC_BRANCH="sync/hotfix-to-develop"
+          # Crear un nombre de rama dinámico basado en el nombre del hotfix
+          HOTFIX_NAME=$(echo "${{ steps.detect_hotfix.outputs.hotfix_branch }}" | sed 's/hotfix\///')
+          SYNC_BRANCH="sync/${HOTFIX_NAME}-to-develop"
           
           # Asegurarnos de estar en main actualizado
           git checkout main
@@ -158,12 +169,13 @@ jobs:
       # Ahora usamos la CLI de GitHub para crear el PR directamente
       - name: Crear PR con GitHub CLI
         id: create_pr
-        if: steps.detect_hotfix.outputs.is_hotfix == 'true' && steps.prepare.outputs.develop_exists == 'true' && steps.prepare.outputs.need_sync == 'true' && steps.create_branch.outputs.branch_name != ''
+        if: steps.detect_hotfix.outputs.is_hotfix == 'true' && steps.detect_hotfix.outputs.is_develop_merge != 'true' && steps.prepare.outputs.develop_exists == 'true' && steps.prepare.outputs.need_sync == 'true' && steps.create_branch.outputs.branch_name != ''
         run: |
+          set -euo pipefail
           SYNC_BRANCH="${{ steps.create_branch.outputs.branch_name }}"
           
-          # Crear el PR directamente con gh cli
-          PR_URL=$(gh pr create \
+          # Crear el PR directamente con gh cli usando JSON para salida estructurada
+          gh pr create \
             --title "🔄 Sync: Hotfix from main to develop" \
             --body "# ⚠️ Sincronización de hotfix (ALTA PRIORIDAD)
             
@@ -189,14 +201,16 @@ jobs:
             - Si hay conflictos, deben resolverse manualmente" \
             --base develop \
             --head $SYNC_BRANCH \
-            --label "hotfix,sync,automated,high-priority")
+            --label "hotfix,sync,automated,high-priority,urgent" \
+            --json url,number > pr.json
           
-          if [ -n "$PR_URL" ]; then
+          # Extraer información del PR desde el JSON
+          PR_URL=$(jq -r .url pr.json)
+          PR_NUMBER=$(jq -r .number pr.json)
+          
+          if [ -n "$PR_URL" ] && [ -n "$PR_NUMBER" ]; then
             echo "✅ PR creado exitosamente: $PR_URL"
             echo "pull_request_url=$PR_URL" >> $GITHUB_OUTPUT
-            
-            # Extraer el número de PR del URL
-            PR_NUMBER=$(echo $PR_URL | grep -oE '[0-9]+$')
             echo "pull_request_number=$PR_NUMBER" >> $GITHUB_OUTPUT
             
             # Asignar revisores
@@ -204,6 +218,7 @@ jobs:
             gh pr edit $PR_NUMBER --add-reviewer "$REVIEWERS" --add-assignee "${{ github.repository_owner }}"
           else
             echo "❌ Falló la creación del PR"
+            exit 1
           fi
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -211,13 +226,14 @@ jobs:
       # En caso de fallo al crear el PR, crear un issue para manual tracking
       - name: Crear issue si falló el PR
         id: create_issue
-        if: steps.detect_hotfix.outputs.is_hotfix == 'true' && steps.prepare.outputs.develop_exists == 'true' && steps.prepare.outputs.need_sync == 'true' && (steps.create_branch.outputs.branch_name == '' || steps.create_pr.outputs.pull_request_number == '')
+        if: steps.detect_hotfix.outputs.is_hotfix == 'true' && steps.detect_hotfix.outputs.is_develop_merge != 'true' && steps.prepare.outputs.develop_exists == 'true' && steps.prepare.outputs.need_sync == 'true' && (steps.create_branch.outputs.branch_name == '' || steps.create_pr.outputs.pull_request_number == '')
         run: |
           echo "⚠️ No se pudo crear el PR automáticamente, creando issue para seguimiento manual..."
           
           # Crear primero las etiquetas necesarias
           gh label list | grep -q "hotfix" || gh label create "hotfix" --color "d73a4a" --description "Corrección urgente para producción"
           gh label list | grep -q "high-priority" || gh label create "high-priority" --color "b60205" --description "Necesita atención inmediata"
+          gh label list | grep -q "urgent" || gh label create "urgent" --color "d93f0b" --description "Requiere atención inmediata"
           
           # Usamos solo etiquetas que sabemos que existen
           ISSUE_URL=$(gh issue create \
@@ -237,7 +253,7 @@ jobs:
             ## Impacto
             Hasta que no se sincronice este hotfix, la rama develop estará desactualizada y no incluirá las correcciones críticas aplicadas a producción.
             " \
-            --label "hotfix,high-priority")
+            --label "hotfix,high-priority,urgent")
           
           if [ -n "$ISSUE_URL" ]; then
             echo "✅ Issue creado: $ISSUE_URL"
@@ -249,7 +265,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Verificar resultado
-        if: steps.detect_hotfix.outputs.is_hotfix == 'true'
+        if: steps.detect_hotfix.outputs.is_hotfix == 'true' && steps.detect_hotfix.outputs.is_develop_merge != 'true'
         run: |
           if [ "${{ steps.prepare.outputs.need_sync }}" != "true" ]; then
             echo "✅ No se requiere sincronización (ramas ya sincronizadas)"
