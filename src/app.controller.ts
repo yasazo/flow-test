@@ -67,18 +67,6 @@ export class AppController {
   }
 
   /**
-   * Endpoint simplificado para liveness probe de Kubernetes
-   * Responde rápidamente sin cálculos adicionales para verificaciones frecuentes
-   */
-  @Get('liveness')
-  getLiveness(): any {
-    return {
-      status: 'alive',
-      timestamp: new Date().toISOString(),
-    };
-  }
-
-  /**
    * Endpoint para obtener un estado detallado del sistema
    * Proporciona información extendida sobre la aplicación y su entorno
    */
